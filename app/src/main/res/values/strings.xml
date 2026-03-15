@@ -1,6 +1,3 @@
 <resources>
     <string name="app_name">ZooApplication</string>
-    <string name="dog">dog</string>
-    <string name="bird">bird</string>
-    <string name="bug">bug</string>
 </resources>
