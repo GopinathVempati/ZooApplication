@@ -17,41 +17,24 @@ class AnimalRepositoryImpl @Inject constructor(
     private val animalDao: AnimalDao
 ) : AnimalRepository {
 
-    override fun getAnimals(): Flow<List<Animal>> {
-        return animalDao.getAllAnimals().map { entities ->
-            entities.map { it.toDomainModel() }
-        }
-    }
+    override fun getAnimals(): Flow<List<Animal>> =
+        animalDao.getAllAnimals().map { entities -> entities.map { it.toDomainModel() } }
 
     override suspend fun refreshAnimalsIfNeeded() = withContext(Dispatchers.IO) {
         val lastFetch = animalDao.getLastFetchTime()
-        val now = System.currentTimeMillis()
-        val tenMinutesMillis = 10 * 60 * 1000
-        val needsRefresh = lastFetch == null || (now - lastFetch) > tenMinutesMillis
-
+        val needsRefresh = lastFetch == null || (System.currentTimeMillis() - lastFetch) > CACHE_DURATION_MS
         if (!needsRefresh) return@withContext
 
-        try {
-            animalDao.clearAll()
-            val categories = listOf("dog", "bird", "bug")
-            val currentTime = System.currentTimeMillis()
-            val allEntities = mutableListOf<AnimalEntity>()
-
-            for (category in categories) {
-                val response = apiService.getAnimals(name = category)
-                if (response.isSuccessful && response.body() != null) {
-                    val limitedResults = response.body()!!.take(3)
-                    val entities = limitedResults.map { apiAnimal ->
-                        apiAnimal.toDomainModel(category).toEntity(fetchedAt = currentTime)
-                    }
-                    allEntities.addAll(entities)
-                }
-            }
-
-            animalDao.insertAnimals(allEntities)
-        } catch (e: Exception) {
-            throw e
+        val currentTime = System.currentTimeMillis()
+        val allEntities = CATEGORIES.flatMap { category ->
+            val response = apiService.getAnimals(name = category)
+            response.body()?.take(RESULTS_PER_CATEGORY)?.map { apiAnimal ->
+                apiAnimal.toDomainModel(category).toEntity(fetchedAt = currentTime)
+            } ?: emptyList()
         }
+
+        animalDao.clearAll()
+        animalDao.insertAnimals(allEntities)
     }
 
     private fun AnimalEntity.toDomainModel(): Animal = Animal(
@@ -69,15 +52,15 @@ class AnimalRepositoryImpl @Inject constructor(
     )
 
     private fun AnimalItem.toDomainModel(category: String): Animal = Animal(
-        name = this.name,
-        commonName = this.characteristics.commonName ?: this.name,
-        phylum = this.taxonomy.phylum,
-        scientificName = this.taxonomy.scientificName,
+        name = name,
+        commonName = characteristics.commonName ?: name,
+        phylum = taxonomy.phylum,
+        scientificName = taxonomy.scientificName,
         category = category,
-        slogan = this.characteristics.slogan,
-        lifespan = this.characteristics.lifespan,
-        habitat = this.characteristics.habitat,
-        prey = this.characteristics.prey
+        slogan = characteristics.slogan,
+        lifespan = characteristics.lifespan,
+        habitat = characteristics.habitat,
+        prey = characteristics.prey
     )
 
     private fun Animal.toEntity(fetchedAt: Long): AnimalEntity = AnimalEntity(
@@ -94,4 +77,10 @@ class AnimalRepositoryImpl @Inject constructor(
         predators = predators,
         fetchedAt = fetchedAt
     )
+
+    companion object {
+        private const val CACHE_DURATION_MS = 10 * 60 * 1000L
+        private const val RESULTS_PER_CATEGORY = 3
+        val CATEGORIES = listOf("dog", "bird", "bug")
+    }
 }
